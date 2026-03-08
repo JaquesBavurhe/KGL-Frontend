@@ -1,5 +1,21 @@
 const formatNumber = (value) => new Intl.NumberFormat("en-UG").format(value || 0);
-const apiFetch = (url, options = {}) => fetch(url, { credentials: "include", ...options });
+const API_BASE_URL = "https://kgl-backend-2-5od0.onrender.com";
+const buildApiUrl = (url) =>
+  /^https?:\/\//i.test(url)
+    ? url
+    : `${API_BASE_URL}${url.startsWith("/") ? "" : "/"}${url}`;
+const apiFetch = (url, options = {}) => fetch(buildApiUrl(url), { credentials: "include", ...options });
+const redirectToLoginPage = () => {
+  window.location.href = "/login.html";
+};
+const logoutAndRedirect = async () => {
+  try {
+    await apiFetch("/logout");
+  } catch (_) {
+    // Ignore logout API errors and still return to login page.
+  }
+  redirectToLoginPage();
+};
 
 // Normalizes `datetime-local` input values before sending to API.
 const toIsoFromDateTimeLocal = (value) => {
@@ -100,8 +116,8 @@ const setupProfileMenu = () => {
     openProfileModal();
   });
 
-  logoutFromMenuButton?.addEventListener("click", () => {
-    window.location.href = "/logout";
+  logoutFromMenuButton?.addEventListener("click", async () => {
+    await logoutAndRedirect();
   });
 
   closeProfileModalButton?.addEventListener("click", closeProfileModal);
@@ -342,7 +358,7 @@ const loadDashboard = async () => {
   ]);
 
   if (!meRes.ok) {
-    window.location.href = "/login";
+    redirectToLoginPage();
     return;
   }
 
@@ -501,8 +517,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     statusId: "creditStatus",
   });
 
-  document.getElementById("logoutButton")?.addEventListener("click", () => {
-    window.location.href = "/logout";
+  document.getElementById("logoutButton")?.addEventListener("click", async () => {
+    await logoutAndRedirect();
   });
 
   setupProfileMenu();

@@ -1,6 +1,38 @@
 document.addEventListener("DOMContentLoaded", () => {
   const errorTimers = new Map();
-  const apiFetch = (url, options = {}) => fetch(url, { credentials: "include", ...options });
+  const API_BASE_URL = "https://kgl-backend-2-5od0.onrender.com";
+  const buildApiUrl = (url) =>
+    /^https?:\/\//i.test(url)
+      ? url
+      : `${API_BASE_URL}${url.startsWith("/") ? "" : "/"}${url}`;
+  const apiFetch = (url, options = {}) => fetch(buildApiUrl(url), { credentials: "include", ...options });
+  const redirectToLoginPage = () => {
+    window.location.href = "/login.html";
+  };
+  const redirectToRoleDashboard = (user) => {
+    const role = user?.role;
+    if (role === "Director") {
+      window.location.href = "/directorDashboard.html";
+      return;
+    }
+    if (role === "Manager") {
+      window.location.href = "/managerDashboard.html";
+      return;
+    }
+    if (role === "Sales Agent") {
+      window.location.href = "/salesAgentDashboard.html";
+      return;
+    }
+    window.location.href = "/index.html";
+  };
+  const logoutAndRedirect = async () => {
+    try {
+      await apiFetch("/logout");
+    } catch (_) {
+      // Redirect to login even if backend logout request fails.
+    }
+    redirectToLoginPage();
+  };
 
   // Toast UI helpers used by login/signup feedback.
   const ensureToastStyles = () => {
@@ -278,7 +310,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (response.ok) {
           showToast("Registration successful. Redirecting to login...", "success");
           setTimeout(() => {
-            window.location.href = "/login";
+            redirectToLoginPage();
           }, 900);
         } else {
           showToast(result.message || "Failed to sign up", "error");
@@ -311,9 +343,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const firstLoginNewPassword = document.getElementById("firstLoginNewPassword");
 
     let cachedLoginPassword = "";
+    let cachedLoggedInUser = null;
 
     const redirectToDashboard = () => {
-      window.location.href = "/dashboard";
+      redirectToRoleDashboard(cachedLoggedInUser);
     };
 
     const openFirstLoginModal = () => {
@@ -379,6 +412,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (response.ok) {
           const mustResetPassword = Boolean(result?.user?.mustResetPassword);
+          cachedLoggedInUser = result?.user || null;
           cachedLoginPassword = password;
 
           if (mustResetPassword) {
@@ -492,8 +526,8 @@ document.addEventListener("DOMContentLoaded", () => {
   // Generic logout button fallback for pages that include this script.
   const logoutButton = document.getElementById("logoutButton");
   if (logoutButton) {
-    logoutButton.addEventListener("click", () => {
-      window.location.href = "/logout";
+    logoutButton.addEventListener("click", async () => {
+      await logoutAndRedirect();
     });
   }
 });
