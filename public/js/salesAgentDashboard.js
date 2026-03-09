@@ -1,13 +1,29 @@
+// Core formatter/API utilities used across sales-agent dashboard workflows.
 const formatNumber = (value) => new Intl.NumberFormat("en-UG").format(value || 0);
 const API_BASE_URL = "https://kgl-backend-2-5od0.onrender.com";
+// const API_BASE_URL = "http://localhost:3000";
 const buildApiUrl = (url) =>
   /^https?:\/\//i.test(url)
     ? url
     : `${API_BASE_URL}${url.startsWith("/") ? "" : "/"}${url}`;
-const apiFetch = (url, options = {}) => fetch(buildApiUrl(url), { credentials: "include", ...options });
+const apiFetch = async (url, options = {}) => {
+  const { showLoader = true, loadingMessage = "Loading...", ...fetchOptions } = options;
+  if (showLoader && window.AppLoader) {
+    window.AppLoader.show(loadingMessage);
+  }
+  try {
+    return await fetch(buildApiUrl(url), { credentials: "include", ...fetchOptions });
+  } finally {
+    if (showLoader && window.AppLoader) {
+      window.AppLoader.hide();
+    }
+  }
+};
 const redirectToLoginPage = () => {
   window.location.href = "/login.html";
 };
+
+// Attempts backend logout, then always routes session back to login.
 const logoutAndRedirect = async () => {
   try {
     await apiFetch("/logout");
@@ -69,7 +85,7 @@ const applyProfileHeader = (user) => {
   }
 };
 
-// Controls sales-agent profile dropdown + manage-profile modal behavior.
+// Wires profile dropdown interactions and profile update modal behavior.
 const setupProfileMenu = () => {
   const menuToggle = document.getElementById("profileMenuToggle");
   const menu = document.getElementById("profileMenu");
@@ -197,7 +213,7 @@ const setupProfileMenu = () => {
   });
 };
 
-// Auto-price support and table rendering helpers.
+// Resets sale forms/status messages before opening quick-entry modals.
 const resetCashSaleForm = () => {
   const form = document.getElementById("cashSaleForm");
   form?.reset();
@@ -212,12 +228,13 @@ const resetCreditSaleForm = () => {
   if (status) status.textContent = "";
 };
 
+// Fetches dynamic quote values used to auto-populate amount fields.
 const fetchSaleQuote = async (produceName, tonnageKg) => {
   const params = new URLSearchParams({
     produceName: String(produceName || "").trim(),
     tonnageKg: String(tonnageKg || ""),
   });
-  const res = await apiFetch(`/sales/price-quote?${params.toString()}`);
+  const res = await apiFetch(`/sales/price-quote?${params.toString()}`, { showLoader: false });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(body.message || "Failed to fetch price quote.");
@@ -225,6 +242,7 @@ const fetchSaleQuote = async (produceName, tonnageKg) => {
   return body.quote;
 };
 
+// Binds produce/tonnage inputs to quote API and updates amount/status fields live.
 const setupAutoAmountCalculation = ({ formId, amountName, statusId }) => {
   const form = document.getElementById(formId);
   if (!form) return;
@@ -238,6 +256,7 @@ const setupAutoAmountCalculation = ({ formId, amountName, statusId }) => {
     const produceName = produceInput?.value?.trim() || "";
     const tonnageKg = Number(tonnageInput?.value || 0);
 
+    // Avoid quote calls until both required inputs are present.
     if (!produceName || !tonnageKg) {
       if (amountInput) amountInput.value = "";
       return;
@@ -278,6 +297,7 @@ const setNavSection = (targetId) => {
   });
 };
 
+// Renders unified sales table (cash + credit) with per-row status pills.
 const renderRows = (rows) => {
   const tableBody = document.getElementById("recordsTableBody");
 
@@ -324,6 +344,7 @@ const renderRows = (rows) => {
     .join("");
 };
 
+// Applies search query against cached unified sales rows.
 const applySearchFilter = () => {
   const searchInput = document.getElementById("recordSearch");
   const search = searchInput?.value?.trim().toLowerCase() || "";
@@ -346,6 +367,7 @@ const applySearchFilter = () => {
 
 // Loads sales-agent data and updates overview + records tables.
 const loadDashboard = async () => {
+  // Fetch user identity + sales records in parallel for faster initial render.
   const recordsStatus = document.getElementById("recordsStatus");
 
   if (recordsStatus) {
@@ -357,6 +379,7 @@ const loadDashboard = async () => {
     apiFetch("/sales/records?type=all"),
   ]);
 
+  // Enforce authentication before using dashboard data.
   if (!meRes.ok) {
     redirectToLoginPage();
     return;
@@ -385,6 +408,7 @@ const loadDashboard = async () => {
   document.getElementById("cashTotal").textContent = formatNumber(totalCash);
   document.getElementById("creditTotal").textContent = formatNumber(totalCredit);
 
+  // Build flattened data model for shared table/search rendering.
   const cashRows = cashSales.map((sale) => ({
     type: "Cash",
     produceName: sale.produceName,
@@ -425,6 +449,7 @@ const handleCashSubmit = async (event) => {
 
   if (status) status.textContent = "Saving cash sale...";
 
+  // Backend computes pricing/validation; client submits canonical payload.
   const payload = {
     produceName: form.produceName.value.trim(),
     buyerName: form.buyerName.value.trim(),
@@ -454,6 +479,7 @@ const handleCashSubmit = async (event) => {
   setNavSection("records");
 };
 
+// Handles credit sale create flow, then refreshes overview/table caches.
 const handleCreditSubmit = async (event) => {
   event.preventDefault();
   const status = document.getElementById("creditStatus");
@@ -495,6 +521,7 @@ const handleCreditSubmit = async (event) => {
 
 // Entry point: register UI events and fetch initial dashboard data.
 document.addEventListener("DOMContentLoaded", async () => {
+  // Sidebar navigation switching.
   const navItems = document.querySelectorAll(".nav-item[data-target]");
 
   navItems.forEach((item) => {
@@ -505,6 +532,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   });
 
+  // Search + auto-pricing bindings.
   document.getElementById("recordSearch")?.addEventListener("input", applySearchFilter);
   setupAutoAmountCalculation({
     formId: "cashSaleForm",
@@ -517,12 +545,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     statusId: "creditStatus",
   });
 
+  // Top-level account actions.
   document.getElementById("logoutButton")?.addEventListener("click", async () => {
     await logoutAndRedirect();
   });
 
   setupProfileMenu();
 
+  // Form submit handlers.
   document.getElementById("cashSaleForm")?.addEventListener("submit", (event) => {
     handleCashSubmit(event).catch((error) => {
       const status = document.getElementById("cashStatus");
@@ -537,6 +567,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   });
 
+  // Modal open/close actions.
   document.getElementById("openCashSaleModalButton")?.addEventListener("click", () => {
     resetCashSaleForm();
     openSaleModal("cashSaleModal");
@@ -563,6 +594,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     closeSaleModal("creditSaleModal");
   });
 
+  // Backdrop click + Escape key modal close behavior.
   document.getElementById("cashSaleModal")?.addEventListener("click", (event) => {
     if (event.target.id === "cashSaleModal") {
       closeSaleModal("cashSaleModal");
@@ -580,6 +612,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     closeSaleModal(activeSaleModalId);
   });
 
+  // Initial dashboard hydration.
   try {
     await loadDashboard();
   } catch (error) {

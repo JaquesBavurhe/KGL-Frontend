@@ -1,14 +1,30 @@
 document.addEventListener("DOMContentLoaded", () => {
+  // Tracks dismissal timers for each inline field error to avoid duplicate timers.
   const errorTimers = new Map();
   const API_BASE_URL = "https://kgl-backend-2-5od0.onrender.com";
+  // const API_BASE_URL = "http://localhost:3000";
   const buildApiUrl = (url) =>
     /^https?:\/\//i.test(url)
       ? url
       : `${API_BASE_URL}${url.startsWith("/") ? "" : "/"}${url}`;
-  const apiFetch = (url, options = {}) => fetch(buildApiUrl(url), { credentials: "include", ...options });
+  // Shared request helper for auth/signup pages with optional global loader integration.
+  const apiFetch = async (url, options = {}) => {
+    const { showLoader = true, loadingMessage = "Loading...", ...fetchOptions } = options;
+    if (showLoader && window.AppLoader) {
+      window.AppLoader.show(loadingMessage);
+    }
+    try {
+      return await fetch(buildApiUrl(url), { credentials: "include", ...fetchOptions });
+    } finally {
+      if (showLoader && window.AppLoader) {
+        window.AppLoader.hide();
+      }
+    }
+  };
   const redirectToLoginPage = () => {
     window.location.href = "/login.html";
   };
+  // Routes authenticated users to the dashboard that matches their current role.
   const redirectToRoleDashboard = (user) => {
     const role = user?.role;
     if (role === "Director") {
@@ -125,6 +141,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.head.appendChild(style);
   };
 
+  // Smoothly hides an error row and clears its timer/content.
   const clearFieldError = (errorEl, immediate = false) => {
     if (!errorEl) return;
 
@@ -147,6 +164,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   };
 
+  // Shows a validation error and auto-clears it after a short delay.
   const setFieldError = (errorId, message) => {
     ensureFieldErrorStyles();
 
@@ -167,12 +185,14 @@ document.addEventListener("DOMContentLoaded", () => {
     errorTimers.set(errorId, timer);
   };
 
+  // Clears all currently visible validation errors on the page.
   const clearAllFieldErrors = (immediate = true) => {
     document.querySelectorAll(".error-message").forEach((el) => {
       clearFieldError(el, immediate);
     });
   };
 
+  // Removes stale error text for a field as soon as user resumes typing.
   const bindInputToClearError = (inputId, errorId) => {
     const input = document.getElementById(inputId);
     const errorEl = document.getElementById(errorId);
@@ -185,6 +205,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   };
 
+  // Generic password visibility toggle used by login + first-login reset fields.
   const bindPasswordToggle = (toggleId, inputId) => {
     const toggle = document.getElementById(toggleId);
     const input = document.getElementById(inputId);
@@ -236,6 +257,7 @@ document.addEventListener("DOMContentLoaded", () => {
     bindInputToClearError("role", "roleError");
     bindInputToClearError("password", "passwordError");
 
+    // Signup submit flow with client-side validation before API call.
     signupForm.addEventListener("submit", async (e) => {
       e.preventDefault();
 
@@ -341,9 +363,20 @@ document.addEventListener("DOMContentLoaded", () => {
     const firstLoginPasswordForm = document.getElementById("firstLoginPasswordForm");
     const firstLoginCurrentPassword = document.getElementById("firstLoginCurrentPassword");
     const firstLoginNewPassword = document.getElementById("firstLoginNewPassword");
+    const loginSubmitButton = loginForm.querySelector('button[type="submit"]');
+    const loginButtonDefaultLabel = loginSubmitButton
+      ? loginSubmitButton.textContent.trim()
+      : "Login";
 
     let cachedLoginPassword = "";
     let cachedLoggedInUser = null;
+
+    // Keeps the login button in a clear pending state while auth request is active.
+    const setLoginButtonLoading = (isLoading) => {
+      if (!loginSubmitButton) return;
+      loginSubmitButton.disabled = isLoading;
+      loginSubmitButton.textContent = isLoading ? "Loading..." : loginButtonDefaultLabel;
+    };
 
     const redirectToDashboard = () => {
       redirectToRoleDashboard(cachedLoggedInUser);
@@ -378,6 +411,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (firstLoginNewPassword) firstLoginNewPassword.focus();
     };
 
+    // Login submit flow: authenticate, then branch into normal or first-login reset path.
     loginForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       clearAllFieldErrors();
@@ -401,11 +435,15 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
+      let keepLoadingForRedirect = false;
+      setLoginButtonLoading(true);
+
       try {
         const response = await apiFetch(`/login`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ username, password }),
+          showLoader: false,
         });
 
         const result = await response.json();
@@ -419,18 +457,26 @@ document.addEventListener("DOMContentLoaded", () => {
             showToast("Login successful.", "success");
             openFirstLoginModal();
             showFirstLoginPromptStep();
+            setLoginButtonLoading(false);
           } else {
             showToast("Login successful. Redirecting...", "success");
+            keepLoadingForRedirect = true;
             setTimeout(() => {
               redirectToDashboard();
             }, 900);
           }
         } else {
           showToast(result.message || "Login failed", "error");
+          setLoginButtonLoading(false);
         }
       } catch (error) {
         console.error("Fetch Error:", error);
         showToast("Network error. Is the server running?", "error");
+        setLoginButtonLoading(false);
+      } finally {
+        if (!keepLoadingForRedirect) {
+          setLoginButtonLoading(false);
+        }
       }
     });
 
@@ -457,6 +503,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (firstLoginPasswordForm) {
+      // Handles mandatory first-login password reset before dashboard access.
       firstLoginPasswordForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         clearFieldError(document.getElementById("firstLoginCurrentPasswordError"), true);
